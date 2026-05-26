@@ -18,16 +18,28 @@ app.post('/claude', async (req, res) => {
   try {
     const { system, messages } = req.body;
 
-    // Convert messages to Gemini format
+    console.log('Messages count:', messages?.length);
+    console.log('System length:', system?.length);
+
     const contents = messages.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }]
     }));
 
+    const cleanContents = [];
+    for (const msg of contents) {
+      const last = cleanContents[cleanContents.length - 1];
+      if (last && last.role === msg.role) {
+        last.parts[0].text += '\n' + msg.parts[0].text;
+      } else {
+        cleanContents.push(msg);
+      }
+    }
+
     const body = {
-      system_instruction: { parts: [{ text: system || '' }] },
-      contents,
-      generationConfig: { maxOutputTokens: 800 }
+      system_instruction: { parts: [{ text: (system || '').substring(0, 8000) }] },
+      contents: cleanContents,
+      generationConfig: { maxOutputTokens: 800, temperature: 0.7 }
     };
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`;
@@ -39,12 +51,18 @@ app.post('/claude', async (req, res) => {
     });
 
     const data = await r.json();
+    console.log('Gemini status:', r.status);
+    console.log('Gemini response:', JSON.stringify(data).substring(0, 500));
 
-    // Convert Gemini response to Anthropic format
+    if (!r.ok) {
+      return res.status(r.status).json({ error: data });
+    }
+
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No pude generar una respuesta.';
     res.json({ content: [{ type: 'text', text }] });
 
   } catch(e) {
+    console.error('Error:', e);
     res.status(500).json({ error: e.message });
   }
 });
